@@ -3,6 +3,7 @@ using MongoDB.Driver;
 using JobTracker.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace JobTracker.Api.Controllers
 {
@@ -56,20 +57,22 @@ namespace JobTracker.Api.Controllers
             var userId = GetUserId();
             var filter = Builders<JobApplication>.Filter.Eq(j => j.Id, id) & Builders<JobApplication>.Filter.Eq(j => j.UserId, userId);
 
-            jobUpdate.UpdatedAt = DateTime.UtcNow;
-            var result = await _jobs.ReplaceOneAsync(filter, jobUpdate);
+            updated.UpdatedAt = DateTime.UtcNow;
+            updated.Id = id;
+            updated.UserId = userId;
+            var result = await _jobs.ReplaceOneAsync(filter, updated);
 
             if (result.MatchedCount == 0)
                 return NotFound("Job not found or unauthorized");
 
-            return Ok(jobUpdate);
+            return Ok(updated);
         }
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteJob(string id)
         {
             var userId = GetUserId();
-            var result = await _jobs.DeleteOneAsync(j => j.Id == id && jobs.UserId == userId);
+            var result = await _jobs.DeleteOneAsync(j => j.Id == id && j.UserId == userId);
             if (result.DeletedCount == 0) return NotFound();
             return Ok();
         }

@@ -3,6 +3,7 @@ using MongoDB.Driver;
 using JobTracker.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace JobTracker.Api.Controllers
 {
