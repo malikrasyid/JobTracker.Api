@@ -33,6 +33,16 @@ namespace JobTracker.Api.Controllers
             return Ok(jobs);
         }
 
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetJobById(string id)
+        {
+            var userId = GetUserId();
+            var job = await _jobs.Find(j => j.Id == id && j.UserId == userId).FirstOrDefaultAsync();
+            if (job == null)
+                return NotFound("Job not found or unauthorized");
+            return Ok(job);
+        }
+
         [HttpPost]
         public async Task<IActionResult> CreateJob([FromBody] JobApplication job)
         {

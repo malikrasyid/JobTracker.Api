@@ -39,6 +39,23 @@ namespace JobTracker.Api.Controllers
             }
             return Ok(pipelines);
         }
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetPipelineById(string id) 
+        {
+            var userId = GetUserId();
+            if (id == JobTracker.Api.Config.DefaultPipeline.Id)
+            {
+                return Ok(new {
+                    Id = JobTracker.Api.Config.DefaultPipeline.Id,
+                    Name = JobTracker.Api.Config.DefaultPipeline.Name,
+                    Stages = JobTracker.Api.Config.DefaultPipeline.Stages
+                });
+            }
+            var pipeline = await _pipelines.Find(p => p.Id == id && p.UserId == userId).FirstOrDefaultAsync();
+            if (pipeline == null)
+                return NotFound("Pipeline not found or unauthorized");
+            return Ok(pipeline);
+        }
 
         [HttpPost]
         public async Task<IActionResult> CreatePipeline([FromBody]Pipeline pipeline)
