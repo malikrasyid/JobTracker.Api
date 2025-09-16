@@ -43,6 +43,18 @@ namespace JobTracker.Api.Controllers
             return Ok(job);
         }
 
+        [HttpGet("stage/{stage}")]
+        public async Task<IActionResult> GetJobsByStage(string stage)
+        {
+            var userId = GetUserId();
+            var allowedStages = new[] { "Applied", "Interview", "Offer", "Rejected" };
+            if (!allowedStages.Contains(stage))
+                return BadRequest("Invalid stage.");
+
+            var jobs = await _jobs.Find(j => j.UserId == userId && j.Stage == stage).ToListAsync();
+            return Ok(jobs);
+        }
+
         [HttpPost]
         public async Task<IActionResult> CreateJob([FromBody] JobApplication job)
         {
