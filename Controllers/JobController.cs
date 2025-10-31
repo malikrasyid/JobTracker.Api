@@ -63,12 +63,25 @@ namespace JobTracker.Api.Controllers
             job.CreatedAt = DateTime.UtcNow;
             job.UpdatedAt = DateTime.UtcNow;
 
-            var userPipelines = await _pipelines.Find(p => p.UserId == userId).ToListAsync();
-            if (userPipelines.Count == 0)
+            // ISSUE 1: Should validate if PipelineId exists and belongs to user
+            if (!string.IsNullOrEmpty(job.PipelineId))
             {
+                var pipeline = await _pipelines.Find(p => p.Id == job.PipelineId && p.UserId == userId)
+                                             .FirstOrDefaultAsync();
+                if (pipeline == null)
+                    return BadRequest("Invalid pipeline ID or unauthorized");
+                
+                job.PipelineName = pipeline.Name; // Sync pipeline name
+                job.Stage = pipeline.Stages.FirstOrDefault() ?? "Applied"; // Use first stage from pipeline
+            }
+            else
+            {
+                // Use default pipeline
                 job.PipelineId = JobTracker.Api.Config.DefaultPipeline.Id;
+                job.PipelineName = JobTracker.Api.Config.DefaultPipeline.Name;
                 job.Stage = JobTracker.Api.Config.DefaultPipeline.Stages[0];
             }
+
             await _jobs.InsertOneAsync(job);
             return Ok(job);
         }
@@ -77,7 +90,25 @@ namespace JobTracker.Api.Controllers
         public async Task<IActionResult> UpdateJob(string id, [FromBody] JobApplication updated)
         {
             var userId = GetUserId();
-            var filter = Builders<JobApplication>.Filter.Eq(j => j.Id, id) & Builders<JobApplication>.Filter.Eq(j => j.UserId, userId);
+            
+            // ISSUE 2: Should validate pipeline relationship
+            if (!string.IsNullOrEmpty(updated.PipelineId))
+            {
+                var pipeline = await _pipelines.Find(p => p.Id == updated.PipelineId && p.UserId == userId)
+                                             .FirstOrDefaultAsync();
+                if (pipeline == null)
+                    return BadRequest("Invalid pipeline ID or unauthorized");
+                
+                // ISSUE 3: Sync pipeline name
+                updated.PipelineName = pipeline.Name;
+                
+                // ISSUE 4: Validate stage exists in pipeline
+                if (!pipeline.Stages.Contains(updated.Stage))
+                    return BadRequest("Invalid stage for the selected pipeline");
+            }
+
+            var filter = Builders<JobApplication>.Filter.Eq(j => j.Id, id) & 
+                        Builders<JobApplication>.Filter.Eq(j => j.UserId, userId);
 
             updated.UpdatedAt = DateTime.UtcNow;
             updated.Id = id;
