@@ -15,7 +15,7 @@ namespace JobTracker.Api.Models
 
         [BsonElement("pipelineId")]
         [BsonRepresentation(BsonType.ObjectId)]
-        public string PipelineId { get; set; }
+        public string? PipelineId { get; set; }
 
         [BsonElement("pipelineName")]
         public string PipelineName { get; set; }

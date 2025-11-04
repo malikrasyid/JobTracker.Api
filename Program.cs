@@ -4,6 +4,9 @@ using System.Text;
 using dotenv.net;
 using MongoDB.Driver;
 using JobTracker.Api.Models;
+using JobTracker.Api.Middleware;
+using JobTracker.Api.Auth;
+using Microsoft.AspNetCore.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +30,16 @@ builder.Services.AddSingleton<IMongoClient>(_ =>
     new MongoClient(mongoUri)
 );
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:5173") // Adjust as necessary
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 // 4. Configure JWT Authentication with .env values
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -45,12 +58,30 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// Configure Authorization with roles
+builder.Services.AddAuthorization(options =>
+{
+    // Add policies for roles
+    options.AddPolicy("HasRole_Admin", policy =>
+        policy.Requirements.Add(new RoleRequirement("Admin")));
+    options.AddPolicy("HasRole_User", policy =>
+        policy.Requirements.Add(new RoleRequirement("User")));
+});
+
+// Register authorization handlers
+builder.Services.AddSingleton<IAuthorizationHandler, RoleHandler>();
 builder.Services.AddControllers();
 
 var app = builder.Build();
 
+// Global error handling
+app.UseMiddleware<ErrorHandlingMiddleware>();
+
+app.UseCors("AllowFrontend");
+
+// Authentication & Authorization
 app.UseAuthentication();
+app.UseMiddleware<JwtMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

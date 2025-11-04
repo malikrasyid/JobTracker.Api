@@ -10,7 +10,7 @@ namespace JobTracker.Api.Models
         public string? Id { get; set; }
 
         [BsonElement("name")]
-        public string Name { get; set; } = null!;
+        public string? Name { get; set; }
 
         [BsonElement("username")]
         public string Username { get; set; } = null!;

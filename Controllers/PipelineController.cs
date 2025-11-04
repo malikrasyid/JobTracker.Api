@@ -8,7 +8,7 @@ using System.IdentityModel.Tokens.Jwt;
 namespace JobTracker.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/pipelines")]
     [Authorize]
     public class PipelineController : ControllerBase
     {
@@ -16,7 +16,8 @@ namespace JobTracker.Api.Controllers
 
         public PipelineController(IMongoClient client, IConfiguration config)
         {
-            var db = client.GetDatabase(config["MongoDb:DatabaseName"]);
+            var mongoDb = Environment.GetEnvironmentVariable("MONGO_DBNAME");
+            var db = client.GetDatabase(mongoDb);
             _pipelines = db.GetCollection<Pipeline>("Pipelines");
         }
         private string GetUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? 
@@ -58,34 +59,59 @@ namespace JobTracker.Api.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> CreatePipeline([FromBody]Pipeline pipeline)
+        public async Task<IActionResult> CreatePipzxeline([FromBody] PipelineDto dto)
         {
+            // Validate stages
+            if (dto.Stages == null || !dto.Stages.Any())
+            {
+                return BadRequest(new { message = "At least one stage is required" });
+            }
+
             var userId = GetUserId();
-            pipeline.UserId = userId;
+            
+            var pipeline = new Pipeline
+            {
+                Name = dto.Name,
+                Stages = [.. dto.Stages], // Create new list to ensure proper copying
+                UserId = userId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            // Log the pipeline data before saving
+            Console.WriteLine($"Creating pipeline: Name={pipeline.Name}, Stages={string.Join(", ", pipeline.Stages)}");
+            
             await _pipelines.InsertOneAsync(pipeline);
-            return Ok(pipeline);
+
+            // Verify the saved pipeline
+            var saved = await _pipelines.Find(p => p.Id == pipeline.Id).FirstAsync();
+            Console.WriteLine($"Saved pipeline: Name={saved.Name}, Stages={string.Join(", ", saved.Stages)}");
+            
+            return Ok(saved);
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdatePipeline(string id, [FromBody] Pipeline updated)
+        public async Task<IActionResult> UpdatePipeline(string id, [FromBody] PipelineDto dto)
         {
             var userId = GetUserId();
             var filter = Builders<Pipeline>.Filter.Eq(p => p.Id, id) &
                         Builders<Pipeline>.Filter.Eq(p => p.UserId, userId);
 
-            updated.Id = id;        // ensure same ID
-            updated.UserId = userId; // keep ownership
+            var existing = await _pipelines.Find(filter).FirstOrDefaultAsync();
+            if (existing == null) return NotFound("Pipeline not found or unauthorized");
 
-            var result = await _pipelines.ReplaceOneAsync(filter, updated);
+            if (dto.Name != null) existing.Name = dto.Name;
+            if (dto.Stages != null && dto.Stages.Any()) existing.Stages = new List<string>(dto.Stages);
+            existing.UpdatedAt = DateTime.UtcNow;
 
-            if (result.MatchedCount == 0)
-                return NotFound("Pipeline not found or unauthorized");
+            var result = await _pipelines.ReplaceOneAsync(filter, existing);
+            if (result.MatchedCount == 0) return NotFound("Pipeline not found or unauthorized");
 
-            return Ok(updated);
+            return Ok(existing);
         }
 
         [HttpDelete("{id}")]
-        public async Task<IActionResult> DeletePipeline([FromBody]string id)
+        public async Task<IActionResult> DeletePipeline(string id)
         {
             var userId = GetUserId();
             var result = await _pipelines.DeleteOneAsync(p => p.Id == id && p.UserId == userId);

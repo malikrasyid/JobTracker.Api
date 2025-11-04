@@ -8,7 +8,7 @@ using System.IdentityModel.Tokens.Jwt;
 namespace JobTracker.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/jobs")]
     [Authorize]
     public class JobController : ControllerBase
     {
@@ -17,7 +17,8 @@ namespace JobTracker.Api.Controllers
 
         public JobController(IMongoClient client, IConfiguration config)
         {
-            var db = client.GetDatabase(config["MongoDb:DatabaseName"]);
+            var mongoDb = Environment.GetEnvironmentVariable("MONGO_DBNAME");
+            var db = client.GetDatabase(mongoDb);
             _jobs = db.GetCollection<JobApplication>("Jobs");
             _pipelines = db.GetCollection<Pipeline>("Pipelines");
         }
@@ -56,30 +57,66 @@ namespace JobTracker.Api.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> CreateJob([FromBody] JobApplication job)
+        public async Task<IActionResult> CreateJob([FromBody] JobDto dto)
         {
             var userId = GetUserId();
-            job.UserId = userId;
-            job.CreatedAt = DateTime.UtcNow;
-            job.UpdatedAt = DateTime.UtcNow;
 
-            // ISSUE 1: Should validate if PipelineId exists and belongs to user
-            if (!string.IsNullOrEmpty(job.PipelineId))
+            var job = new JobApplication
             {
-                var pipeline = await _pipelines.Find(p => p.Id == job.PipelineId && p.UserId == userId)
-                                             .FirstOrDefaultAsync();
+                UserId = userId,
+                Name = dto.Name,
+                Company = dto.Company,
+                Role = dto.Role,
+                Location = dto.Location,
+                Source = dto.Source ?? string.Empty,
+                AppliedDate = dto.AppliedDate ?? DateTime.UtcNow,
+                Notes = dto.Notes,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            // Normalize stage input: treat null/empty/whitespace as not provided
+            var requestedStage = string.IsNullOrWhiteSpace(dto.Stage) ? null : dto.Stage.Trim();
+
+            Pipeline? pipeline = null;
+
+            // Case 1: User provided a specific pipeline
+            if (!string.IsNullOrEmpty(dto.PipelineId))
+            {
+                pipeline = await _pipelines.Find(p => p.Id == dto.PipelineId && p.UserId == userId)
+                                        .FirstOrDefaultAsync();
+
                 if (pipeline == null)
-                    return BadRequest("Invalid pipeline ID or unauthorized");
-                
-                job.PipelineName = pipeline.Name; // Sync pipeline name
-                job.Stage = pipeline.Stages.FirstOrDefault() ?? "Applied"; // Use first stage from pipeline
+                    return BadRequest("Invalid pipeline ID or unauthorized.");
+
+                job.PipelineId = pipeline.Id;
+                job.PipelineName = pipeline.Name;
             }
             else
             {
-                // Use default pipeline
+                // Case 2: Use the default pipeline
                 job.PipelineId = JobTracker.Api.Config.DefaultPipeline.Id;
                 job.PipelineName = JobTracker.Api.Config.DefaultPipeline.Name;
-                job.Stage = JobTracker.Api.Config.DefaultPipeline.Stages[0];
+
+                // You may also ensure the default pipeline is inserted into the DB if not exists
+                pipeline = new Pipeline
+                {
+                    Id = JobTracker.Api.Config.DefaultPipeline.Id,
+                    Name = JobTracker.Api.Config.DefaultPipeline.Name,
+                    Stages = JobTracker.Api.Config.DefaultPipeline.Stages
+                };
+            }
+
+            // Determine stage (auto-insert first if null or invalid)
+            if (string.IsNullOrEmpty(requestedStage))
+            {
+                job.Stage = pipeline.Stages.FirstOrDefault() ?? "Applied";
+            }
+            else
+            {
+                job.Stage = pipeline.Stages.Contains(requestedStage)
+                    ? requestedStage
+                    : pipeline.Stages.FirstOrDefault() ?? "Applied";
             }
 
             await _jobs.InsertOneAsync(job);
@@ -87,38 +124,50 @@ namespace JobTracker.Api.Controllers
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateJob(string id, [FromBody] JobApplication updated)
+        public async Task<IActionResult> UpdateJob(string id, [FromBody] JobDto dto)
         {
             var userId = GetUserId();
-            
-            // ISSUE 2: Should validate pipeline relationship
-            if (!string.IsNullOrEmpty(updated.PipelineId))
+
+            var filter = Builders<JobApplication>.Filter.Eq(j => j.Id, id) &
+                        Builders<JobApplication>.Filter.Eq(j => j.UserId, userId);
+
+            var existing = await _jobs.Find(filter).FirstOrDefaultAsync();
+            if (existing == null)
+                return NotFound("Job not found or unauthorized");
+
+            // If pipelineId is provided, validate it belongs to the user
+            if (!string.IsNullOrEmpty(dto.PipelineId))
             {
-                var pipeline = await _pipelines.Find(p => p.Id == updated.PipelineId && p.UserId == userId)
+                var pipeline = await _pipelines.Find(p => p.Id == dto.PipelineId && p.UserId == userId)
                                              .FirstOrDefaultAsync();
                 if (pipeline == null)
                     return BadRequest("Invalid pipeline ID or unauthorized");
-                
-                // ISSUE 3: Sync pipeline name
-                updated.PipelineName = pipeline.Name;
-                
-                // ISSUE 4: Validate stage exists in pipeline
-                if (!pipeline.Stages.Contains(updated.Stage))
+
+                existing.PipelineId = dto.PipelineId;
+                existing.PipelineName = pipeline.Name;
+
+                // Validate stage against pipeline
+                if (!string.IsNullOrEmpty(dto.Stage) && !pipeline.Stages.Contains(dto.Stage))
                     return BadRequest("Invalid stage for the selected pipeline");
             }
 
-            var filter = Builders<JobApplication>.Filter.Eq(j => j.Id, id) & 
-                        Builders<JobApplication>.Filter.Eq(j => j.UserId, userId);
+            // Apply updates (only when provided)
+            if (!string.IsNullOrEmpty(dto.Name)) existing.Name = dto.Name;
+            if (!string.IsNullOrEmpty(dto.Stage)) existing.Stage = dto.Stage;
+            if (!string.IsNullOrEmpty(dto.Company)) existing.Company = dto.Company;
+            if (!string.IsNullOrEmpty(dto.Role)) existing.Role = dto.Role;
+            if (!string.IsNullOrEmpty(dto.Location)) existing.Location = dto.Location;
+            if (dto.Source != null) existing.Source = dto.Source;
+            if (dto.AppliedDate.HasValue) existing.AppliedDate = dto.AppliedDate.Value;
+            if (dto.Notes != null) existing.Notes = dto.Notes;
 
-            updated.UpdatedAt = DateTime.UtcNow;
-            updated.Id = id;
-            updated.UserId = userId;
-            var result = await _jobs.ReplaceOneAsync(filter, updated);
+            existing.UpdatedAt = DateTime.UtcNow;
 
+            var result = await _jobs.ReplaceOneAsync(filter, existing);
             if (result.MatchedCount == 0)
                 return NotFound("Job not found or unauthorized");
 
-            return Ok(updated);
+            return Ok(existing);
         }
 
         [HttpDelete("{id}")]

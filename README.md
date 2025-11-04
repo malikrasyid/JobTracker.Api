@@ -22,6 +22,8 @@ JWT_ISSUER=JobTrackerApi
 JWT_AUDIENCE=JobTrackerClient
 ```
 
+Note: The JWT secret must be at least 16 characters long (128 bits) when using HS256. If the secret is shorter you'll get an error when creating tokens.
+
 ⚠️ **Security Note**: Never commit `.env` to version control. Add it to `.gitignore`:
 ```bash
 echo ".env" >> .gitignore
@@ -58,9 +60,9 @@ The API will start on:
 ## API Endpoints
 
 The API provides endpoints for:
-- Authentication (/auth)
-- Job Applications (/jobs)
-- Application Pipelines (/pipelines)
+- Authentication (`/api/auth`)
+- Job Applications (`/api/jobs`)
+- Application Pipelines (`/api/pipelines`)
 
 ## Development
 

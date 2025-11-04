@@ -42,14 +42,24 @@ namespace JobTracker.Api.Controllers
         }
 
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] User loginDto)
+        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
         {
-            var user = await _users.Find(u => u.Email == loginDto.Email).FirstOrDefaultAsync();
-            if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.PasswordHash, user.PasswordHash))
-                return Unauthorized("Invalid email or password");
+            // Try to find user by email or username
+            var user = await _users.Find(u => 
+                u.Email == loginDto.EmailOrUsername || 
+                u.Username == loginDto.EmailOrUsername
+            ).FirstOrDefaultAsync();
+
+            if (user == null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
+                return Unauthorized("Invalid credentials");
 
             var token = GenerateJwtToken(user);
-            return Ok(new { token });
+            return Ok(new { 
+                token,
+                userId = user.Id,
+                username = user.Username,
+                email = user.Email
+            });
         }
 
         private string GenerateJwtToken(User user)
@@ -59,14 +69,22 @@ namespace JobTracker.Api.Controllers
             var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE");
             var jwtExpireMinutes = Environment.GetEnvironmentVariable("JWT_EXPIRE_MINUTES") ?? "60";
 
+            // Validate secret length: HS256 requires a key of at least 128 bits (16 bytes).
+            if (string.IsNullOrWhiteSpace(jwtSecret) || Encoding.UTF8.GetBytes(jwtSecret).Length < 16)
+            {
+                // Throw a clear exception so the caller sees a descriptive message in logs.
+                throw new InvalidOperationException("JWT_SECRET must be set and at least 16 characters (128 bits) long.");
+            }
+
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 
             var claims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id),
-                new Claim(ClaimTypes.NameIdentifier, user.Id),
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id ?? throw new InvalidOperationException("User ID is required")),
+                new Claim(ClaimTypes.NameIdentifier, user.Id ?? throw new InvalidOperationException("User ID is required")),
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email)
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim("role", "User") // Default role for all users
             };
 
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
